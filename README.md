@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project reads electrical measurements from a **Schneider PM2230** power meter using **Modbus RTU** over an **RS485** serial bus, running on an **ESP32-S3** microcontroller.
+This project reads electrical measurements from a **Schneider PM2230** power meter using **Modbus RTU** over an **RS485** serial bus, running on an **ESP32-C6** microcontroller.
 
 No external Modbus library is used — the protocol is implemented from scratch in OOP style.
 
@@ -12,7 +12,7 @@ No external Modbus library is used — the protocol is implemented from scratch 
 
 ```
 ┌──────────────┐        ┌──────────┐        ┌────────────┐
-│   main.cpp   │───────▶│  PM2230  │───────▶│  ModbusRTU │──── RS485 ──── PM2230 Meter
+│   main.cpp   │───────▶│  PM2200  │───────▶│  ModbusRTU │──── RS485 ──── PM2230 Meter
 │  (setup/loop)│        │  (meter) │        │  (master)  │
 └──────────────┘        └──────────┘        └────────────┘
 ```
@@ -22,14 +22,14 @@ No external Modbus library is used — the protocol is implemented from scratch 
 | Class | Responsibility |
 |-------|---------------|
 | `ModbusRTU` | Low-level Modbus RTU master — builds frames, calculates CRC, sends/receives via RS485 |
-| `PM2230` | High-level meter abstraction — knows the register addresses, reads FLOAT32 values, stores results in `PM2230Data` |
-| `PM2230Data` | Plain struct holding all measurement values (voltages, currents, power, PF, frequency) |
+| `PM2200` | High-level meter abstraction — knows the register addresses, reads FLOAT32 values, stores results in `PM2200Data` |
+| `PM2200Data` | Plain struct holding all measurement values (voltages, currents, power, PF, frequency) |
 
 ### Flow
 
-1. `setup()` — Initializes USB Serial (debug) and RS485 Serial via `ModbusRTU::begin()`
-2. `loop()` — Every 5 seconds calls `PM2230::readAll()` which reads all register groups, then prints results
-3. `PM2230::readAll()` calls individual methods: `readVoltage()`, `readCurrent()`, `readPower()`, `readPowerFactor()`, `readFrequency()`
+1. `setup()` — Initializes USB Serial (debug) and RS485 Serial via `ModbusRTU::begin()`, then auto-scans Modbus addresses 1–20 to find the slave
+2. `loop()` — If no device was found, retries the scan every 5 seconds; otherwise calls `PM2200::readAll()` every 5 seconds and prints results
+3. `PM2200::readAll()` calls individual methods: `readVoltage()`, `readCurrent()`, `readPower()`, `readPowerFactor()`, `readFrequency()`
 4. Each read method calls `ModbusRTU::readHoldingRegisters()` with the appropriate register address and quantity
 5. Raw 16-bit register pairs are converted to `float` via IEEE 754 conversion
 
@@ -191,7 +191,7 @@ Register Lo (second): 0x8000
 
 ### Code Conversion (Register Pair → Float)
 
-The PM2230 transmits registers in **big-endian word order** (high register first):
+The meter transmits registers in **big-endian word order** (high register first):
 
 ```cpp
 float _toFloat(uint16_t regHi, uint16_t regLo) {
@@ -207,14 +207,13 @@ float _toFloat(uint16_t regHi, uint16_t regLo) {
 
 ---
 
-## PM2230 Register Map (used in this code)
+## PM2200 Register Map (used in this code)
 
 | Parameter | Register | Size | Unit |
 |-----------|----------|------|------|
 | Current A | 3000 | FLOAT32 (2 regs) | A |
 | Current B | 3002 | FLOAT32 | A |
 | Current C | 3004 | FLOAT32 | A |
-| Current N | 3006 | FLOAT32 | A |
 | Voltage A-B | 3020 | FLOAT32 | V |
 | Voltage B-C | 3022 | FLOAT32 | V |
 | Voltage C-A | 3024 | FLOAT32 | V |
@@ -245,13 +244,14 @@ float _toFloat(uint16_t regHi, uint16_t regLo) {
 
 ## Wiring Summary
 
-| ESP32-S3 Pin | RS485 Module | Description |
+| ESP32-C6 Pin | RS485 Module | Description |
 |-------------|-------------|-------------|
-| GPIO 16 | RO (Receiver Out) | UART RX |
-| GPIO 17 | DI (Driver In) | UART TX |
+| GPIO 14 | RO (Receiver Out) | UART RX |
+| GPIO 15 | DI (Driver In) | UART TX |
 | GPIO 18 | DE + RE (tied) | Direction control |
 | 3.3V | VCC | Power |
 | GND | GND | Ground |
 
+Serial config: **9600 baud, 8E1** (8 data bits, Even parity, 1 stop bit — Schneider default)
+
 RS485 module A/B lines connect to the PM2230 meter's Modbus RS485 terminal.
-# PM2230
