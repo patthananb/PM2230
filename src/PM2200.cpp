@@ -1,15 +1,15 @@
-#include "PM2230.h"
+#include "PM2200.h"
 
 // ============================================================================
 // Constructor
 // ============================================================================
-PM2230::PM2230(ModbusRTU& modbus, uint8_t slaveAddress)
+PM2200::PM2200(ModbusRTU& modbus, uint8_t slaveAddress)
     : _modbus(modbus), _slaveAddr(slaveAddress) {}
 
 // ============================================================================
 // Read all parameters
 // ============================================================================
-bool PM2230::readAll() {
+bool PM2200::readAll() {
     bool ok = true;
     ok &= readVoltage();
     ok &= readCurrent();
@@ -22,18 +22,18 @@ bool PM2230::readAll() {
 // ============================================================================
 // Read Line-to-Line and Line-to-Neutral voltages
 // ============================================================================
-bool PM2230::readVoltage() {
+bool PM2200::readVoltage() {
     uint16_t regs[6];
 
     // L-L: Vab, Vbc, Vca  (3020–3025, 3 × FLOAT32 = 6 regs)
-    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2230Reg::VOLTAGE_AB, 6, regs))
+    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2200Reg::VOLTAGE_AB, 6, regs))
         return false;
     data.Vab = _toFloat(regs[0], regs[1]);
     data.Vbc = _toFloat(regs[2], regs[3]);
     data.Vca = _toFloat(regs[4], regs[5]);
 
     // L-N: Van, Vbn, Vcn  (3028–3033, 3 × FLOAT32 = 6 regs)
-    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2230Reg::VOLTAGE_AN, 6, regs))
+    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2200Reg::VOLTAGE_AN, 6, regs))
         return false;
     data.Van = _toFloat(regs[0], regs[1]);
     data.Vbn = _toFloat(regs[2], regs[3]);
@@ -43,27 +43,26 @@ bool PM2230::readVoltage() {
 }
 
 // ============================================================================
-// Read phase currents and neutral current
+// Read phase currents (PM2200 has no neutral current input)
 // ============================================================================
-bool PM2230::readCurrent() {
-    // Ia, Ib, Ic, In  (3000–3007, 4 × FLOAT32 = 8 regs)
-    uint16_t regs[8];
-    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2230Reg::CURRENT_A, 8, regs))
+bool PM2200::readCurrent() {
+    // Ia, Ib, Ic  (3000–3005, 3 × FLOAT32 = 6 regs)
+    uint16_t regs[6];
+    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2200Reg::CURRENT_A, 6, regs))
         return false;
     data.Ia = _toFloat(regs[0], regs[1]);
     data.Ib = _toFloat(regs[2], regs[3]);
     data.Ic = _toFloat(regs[4], regs[5]);
-    data.In = _toFloat(regs[6], regs[7]);
     return true;
 }
 
 // ============================================================================
 // Read Active, Reactive and Apparent power (all 3 phases + total)
 // ============================================================================
-bool PM2230::readPower() {
+bool PM2200::readPower() {
     // P, Q, S  (3054–3077, 12 × FLOAT32 = 24 regs)
     uint16_t regs[24];
-    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2230Reg::ACTIVE_POWER_A, 24, regs))
+    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2200Reg::ACTIVE_POWER_A, 24, regs))
         return false;
 
     data.Pa     = _toFloat(regs[0],  regs[1]);
@@ -87,9 +86,9 @@ bool PM2230::readPower() {
 // ============================================================================
 // Read Power Factor (3 phases + total)
 // ============================================================================
-bool PM2230::readPowerFactor() {
+bool PM2200::readPowerFactor() {
     uint16_t regs[8];
-    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2230Reg::PF_A, 8, regs))
+    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2200Reg::PF_A, 8, regs))
         return false;
     data.PFa     = _toFloat(regs[0], regs[1]);
     data.PFb     = _toFloat(regs[2], regs[3]);
@@ -101,9 +100,9 @@ bool PM2230::readPowerFactor() {
 // ============================================================================
 // Read Frequency
 // ============================================================================
-bool PM2230::readFrequency() {
+bool PM2200::readFrequency() {
     uint16_t regs[2];
-    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2230Reg::FREQUENCY, 2, regs))
+    if (!_modbus.readHoldingRegisters(_slaveAddr, PM2200Reg::FREQUENCY, 2, regs))
         return false;
     data.frequency = _toFloat(regs[0], regs[1]);
     return true;
@@ -112,8 +111,8 @@ bool PM2230::readFrequency() {
 // ============================================================================
 // Print all readings to Serial monitor
 // ============================================================================
-void PM2230::printReadings() {
-    Serial.println("========== PM2230 Power Meter Readings ==========");
+void PM2200::printReadings() {
+    Serial.println("========== PM2200 Power Meter Readings ==========");
 
     Serial.println("--- Voltage Line-to-Neutral ---");
     Serial.printf("  Van: %.2f V\n", data.Van);
@@ -129,7 +128,6 @@ void PM2230::printReadings() {
     Serial.printf("  Ia:  %.3f A\n", data.Ia);
     Serial.printf("  Ib:  %.3f A\n", data.Ib);
     Serial.printf("  Ic:  %.3f A\n", data.Ic);
-    Serial.printf("  In:  %.3f A\n", data.In);
 
     Serial.println("--- Active Power (P) ---");
     Serial.printf("  Pa: %.3f kW   Pb: %.3f kW   Pc: %.3f kW\n",
@@ -156,9 +154,16 @@ void PM2230::printReadings() {
 }
 
 // ============================================================================
+// Print error message when the power meter is not responding
+// ============================================================================
+void PM2200::printNotResponding() {
+    Serial.printf("[PM2200] ERROR: Device at slave address %d is not responding.\n", _slaveAddr);
+}
+
+// ============================================================================
 // IEEE 754 FLOAT32 conversion (two 16-bit registers → float)
 // ============================================================================
-float PM2230::_toFloat(uint16_t regHi, uint16_t regLo) {
+float PM2200::_toFloat(uint16_t regHi, uint16_t regLo) {
     uint32_t raw = ((uint32_t)regHi << 16) | regLo;
     float value;
     memcpy(&value, &raw, sizeof(float));

@@ -1,19 +1,18 @@
-#ifndef PM2230_H
-#define PM2230_H
+#ifndef PM2200_H
+#define PM2200_H
 
 #include <Arduino.h>
 #include "ModbusRTU.h"
 
 // ============================================================================
-// PM2230 Register Map (from Schneider PM2xxx Register List)
+// PM2200 Register Map (from Schneider PM2xxx Register List)
 // All metering registers are FLOAT32 (2 × 16-bit, big-endian word order)
 // ============================================================================
-namespace PM2230Reg {
+namespace PM2200Reg {
     // Current (A)
     constexpr uint16_t CURRENT_A       = 3000;
     constexpr uint16_t CURRENT_B       = 3002;
     constexpr uint16_t CURRENT_C       = 3004;
-    constexpr uint16_t CURRENT_N       = 3006;
     constexpr uint16_t CURRENT_AVG     = 3010;
 
     // Voltage Line-to-Line (V)
@@ -56,17 +55,15 @@ namespace PM2230Reg {
 }
 
 // ============================================================================
-// PM2230 Data Structure
+// PM2200 Data Structure
 // ============================================================================
-struct PM2230Data {
+struct PM2200Data {
     // Line-to-Neutral Voltage (V)
     float Van = 0, Vbn = 0, Vcn = 0;
     // Line-to-Line Voltage (V)
     float Vab = 0, Vbc = 0, Vca = 0;
-    // Line Current (A) — phase currents are the line currents
+    // Line Current (A)
     float Ia = 0, Ib = 0, Ic = 0;
-    // Neutral Current (A)
-    float In = 0;
     // Active Power (kW)
     float Pa = 0, Pb = 0, Pc = 0, Ptotal = 0;
     // Reactive Power (kVAR)
@@ -80,13 +77,13 @@ struct PM2230Data {
 };
 
 // ============================================================================
-// PM2230 Power Meter Class
+// PM2200 Power Meter Class
 // ============================================================================
-class PM2230 {
+class PM2200 {
 public:
-    PM2230(ModbusRTU& modbus, uint8_t slaveAddress = 1);
+    PM2200(ModbusRTU& modbus, uint8_t slaveAddress = 1);
 
-    PM2230Data data;
+    PM2200Data data;
 
     bool readAll();
     bool readVoltage();
@@ -95,6 +92,9 @@ public:
     bool readPowerFactor();
     bool readFrequency();
     void printReadings();
+    void printNotResponding();
+
+    void setSlaveAddress(uint8_t addr) { _slaveAddr = addr; }
 
 private:
     ModbusRTU& _modbus;
@@ -104,4 +104,4 @@ private:
     float _toFloat(uint16_t regHi, uint16_t regLo);
 };
 
-#endif // PM2230_H
+#endif // PM2200_H
