@@ -9,49 +9,52 @@
 // All metering registers are FLOAT32 (2 × 16-bit, big-endian word order)
 // ============================================================================
 namespace PM2200Reg {
+    // Register addresses are 0-based on the wire (datasheet value - 1).
+    // e.g. datasheet shows 3000 → send 2999 over Modbus.
+
     // Current (A)
-    constexpr uint16_t CURRENT_A       = 3000;
-    constexpr uint16_t CURRENT_B       = 3002;
-    constexpr uint16_t CURRENT_C       = 3004;
-    constexpr uint16_t CURRENT_AVG     = 3010;
+    constexpr uint16_t CURRENT_A       = 2999;
+    constexpr uint16_t CURRENT_B       = 3001;
+    constexpr uint16_t CURRENT_C       = 3003;
+    constexpr uint16_t CURRENT_AVG     = 3009;
 
     // Voltage Line-to-Line (V)
-    constexpr uint16_t VOLTAGE_AB      = 3020;
-    constexpr uint16_t VOLTAGE_BC      = 3022;
-    constexpr uint16_t VOLTAGE_CA      = 3024;
-    constexpr uint16_t VOLTAGE_LL_AVG  = 3026;
+    constexpr uint16_t VOLTAGE_AB      = 3019;
+    constexpr uint16_t VOLTAGE_BC      = 3021;
+    constexpr uint16_t VOLTAGE_CA      = 3023;
+    constexpr uint16_t VOLTAGE_LL_AVG  = 3025;
 
     // Voltage Line-to-Neutral (V)
-    constexpr uint16_t VOLTAGE_AN      = 3028;
-    constexpr uint16_t VOLTAGE_BN      = 3030;
-    constexpr uint16_t VOLTAGE_CN      = 3032;
+    constexpr uint16_t VOLTAGE_AN      = 3027;
+    constexpr uint16_t VOLTAGE_BN      = 3029;
+    constexpr uint16_t VOLTAGE_CN      = 3031;
 
     // Active Power (kW)
-    constexpr uint16_t ACTIVE_POWER_A     = 3054;
-    constexpr uint16_t ACTIVE_POWER_B     = 3056;
-    constexpr uint16_t ACTIVE_POWER_C     = 3058;
-    constexpr uint16_t ACTIVE_POWER_TOTAL = 3060;
+    constexpr uint16_t ACTIVE_POWER_A     = 3053;
+    constexpr uint16_t ACTIVE_POWER_B     = 3055;
+    constexpr uint16_t ACTIVE_POWER_C     = 3057;
+    constexpr uint16_t ACTIVE_POWER_TOTAL = 3059;
 
     // Reactive Power (kVAR)
-    constexpr uint16_t REACTIVE_POWER_A     = 3062;
-    constexpr uint16_t REACTIVE_POWER_B     = 3064;
-    constexpr uint16_t REACTIVE_POWER_C     = 3066;
-    constexpr uint16_t REACTIVE_POWER_TOTAL = 3068;
+    constexpr uint16_t REACTIVE_POWER_A     = 3061;
+    constexpr uint16_t REACTIVE_POWER_B     = 3063;
+    constexpr uint16_t REACTIVE_POWER_C     = 3065;
+    constexpr uint16_t REACTIVE_POWER_TOTAL = 3067;
 
     // Apparent Power (kVA)
-    constexpr uint16_t APPARENT_POWER_A     = 3070;
-    constexpr uint16_t APPARENT_POWER_B     = 3072;
-    constexpr uint16_t APPARENT_POWER_C     = 3074;
-    constexpr uint16_t APPARENT_POWER_TOTAL = 3076;
+    constexpr uint16_t APPARENT_POWER_A     = 3069;
+    constexpr uint16_t APPARENT_POWER_B     = 3071;
+    constexpr uint16_t APPARENT_POWER_C     = 3073;
+    constexpr uint16_t APPARENT_POWER_TOTAL = 3075;
 
     // Power Factor
-    constexpr uint16_t PF_A     = 3078;
-    constexpr uint16_t PF_B     = 3080;
-    constexpr uint16_t PF_C     = 3082;
-    constexpr uint16_t PF_TOTAL = 3084;
+    constexpr uint16_t PF_A     = 3077;
+    constexpr uint16_t PF_B     = 3079;
+    constexpr uint16_t PF_C     = 3081;
+    constexpr uint16_t PF_TOTAL = 3083;
 
     // Frequency (Hz)
-    constexpr uint16_t FREQUENCY = 3110;
+    constexpr uint16_t FREQUENCY = 3109;
 }
 
 // ============================================================================

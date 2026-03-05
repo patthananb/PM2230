@@ -1,5 +1,4 @@
 Read the power meter Data
-Do not use library.
 Write the code in OOP style.
 ========================================
 Line to neutral Voltage :Van Vbn Vcn

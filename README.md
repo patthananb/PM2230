@@ -1,200 +1,217 @@
-# PM2230 Power Meter — Code Explanation
+# PM2200 Power Meter — ESP32-C6 Modbus RTU Reader
 
 ## Overview
 
-This project reads electrical measurements from a **Schneider PM2230** power meter using **Modbus RTU** over an **RS485** serial bus, running on an **ESP32-C6** microcontroller.
+This project reads electrical measurements from a **Schneider PM2200** power meter using **Modbus RTU** over an **RS485** serial bus, running on an **ESP32-C6** microcontroller.
 
-No external Modbus library is used — the protocol is implemented from scratch in OOP style.
+No external Modbus library is used — the Modbus RTU protocol is implemented from scratch in a single Arduino sketch (`arduinocore/arduinocore.ino`).
 
----
+### Measurements Read
 
-## Code Architecture
-
-```
-┌──────────────┐        ┌──────────┐        ┌────────────┐
-│   main.cpp   │───────▶│  PM2200  │───────▶│  ModbusRTU │──── RS485 ──── PM2230 Meter
-│  (setup/loop)│        │  (meter) │        │  (master)  │
-└──────────────┘        └──────────┘        └────────────┘
-```
-
-### Classes
-
-| Class | Responsibility |
-|-------|---------------|
-| `ModbusRTU` | Low-level Modbus RTU master — builds frames, calculates CRC, sends/receives via RS485 |
-| `PM2200` | High-level meter abstraction — knows the register addresses, reads FLOAT32 values, stores results in `PM2200Data` |
-| `PM2200Data` | Plain struct holding all measurement values (voltages, currents, power, PF, frequency) |
-
-### Flow
-
-1. `setup()` — Initializes USB Serial (debug) and RS485 Serial via `ModbusRTU::begin()`, then auto-scans Modbus addresses 1–20 to find the slave
-2. `loop()` — If no device was found, retries the scan every 5 seconds; otherwise calls `PM2200::readAll()` every 5 seconds and prints results
-3. `PM2200::readAll()` calls individual methods: `readVoltage()`, `readCurrent()`, `readPower()`, `readPowerFactor()`, `readFrequency()`
-4. Each read method calls `ModbusRTU::readHoldingRegisters()` with the appropriate register address and quantity
-5. Raw 16-bit register pairs are converted to `float` via IEEE 754 conversion
+| Parameter | Registers | Unit |
+|-----------|-----------|------|
+| Voltage Van, Vbn, Vcn | 3027–3032 (wire) | V |
+| Current Ia, Ib, Ic | 2999–3004 | A |
+| Energy Delivered | 2699–2700 | kWh |
+| Active Power Pa, Pb, Pc, P total | 3053–3060 | kW |
+| Reactive Power Qa, Qb, Qc, Q total | 3061–3068 | kVAR |
+| Apparent Power Sa, Sb, Sc, S total | 3069–3076 | kVA |
 
 ---
 
-## Modbus RTU Protocol
+## Hardware
 
-### What is Modbus RTU?
+### Physical Hardware Chain
 
-Modbus RTU (Remote Terminal Unit) is a serial communication protocol. "RTU" means data is transmitted in **binary** (not ASCII). Each byte is sent as-is on the wire, making it compact and efficient.
+```
+┌─────────────────────────────────┐        ┌──────────────────┐        ┌─────────────────┐
+│           ESP32-C6              │        │  RS485 Module    │        │  PM2200 Meter   │
+│                                 │        │  (e.g. MAX485)   │        │                 │
+│  GPIO7 (TX) ──────────────────▶ │ DI     │                  │        │                 │
+│  GPIO6 (RX) ◀────────────────── │ RO     │              A ──│──────▶ │ A (D+)          │
+│  GPIO4 (DE) ──────────────────▶ │ DE+RE  │              B ──│──────▶ │ B (D−)          │
+│                                 │        │                  │        │                 │
+│  USB CDC (Serial) ──▶ PC        │        │  Half-duplex     │        │  Slave addr: 2  │
+│                                 │        │  RS485 bus       │        │  9600 baud, 8N1 │
+└─────────────────────────────────┘        └──────────────────┘        └─────────────────┘
+```
 
-### RS485 Physical Layer
+### Wiring
 
-RS485 is a **differential** electrical standard using two wires (A and B). It supports:
-- Long distances (up to 1200m)
-- Multiple devices on one bus (up to 32 nodes)
-- Half-duplex communication (one talks at a time)
+| ESP32-C6 Pin | RS485 Module | Signal |
+|-------------|-------------|--------|
+| GPIO 7 | DI (Driver Input) | TX |
+| GPIO 6 | RO (Receiver Output) | RX |
+| GPIO 4 | DE + RE (tied together) | Direction control |
+| 3.3V or 5V | VCC | Check module spec — MAX485 needs 5V |
+| GND | GND | Ground |
 
-The **DE (Driver Enable)** pin controls the RS485 transceiver direction:
-- `DE = HIGH` → Transmit mode (ESP32 sends data)
-- `DE = LOW` → Receive mode (ESP32 listens for response)
+Serial config: **9600 baud, 8N1**
 
-### Frame Structure (Function Code 0x03 — Read Holding Registers)
+---
 
-#### Request Frame (Master → Slave)
+## Build & Flash
 
+### Compile (CDCOnBoot=cdc is required for USB Serial on ESP32-C6)
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32c6:CDCOnBoot=cdc arduinocore/arduinocore.ino
+```
+
+### Export binaries
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32c6:CDCOnBoot=cdc --export-binaries arduinocore/arduinocore.ino
+```
+
+### Flash with esptool
+
+```bash
+ESPTOOL=~/Library/Arduino15/packages/esp32/tools/esptool_py/5.1.0/esptool
+BUILD=arduinocore/build/esp32.esp32.esp32c6
+
+$ESPTOOL --chip esp32c6 --port /dev/tty.usbmodem101 --baud 460800 \
+  --before default-reset --after hard-reset write-flash -z \
+  --flash-mode dio --flash-freq 80m --flash-size detect \
+  0x0     $BUILD/arduinocore.ino.bootloader.bin \
+  0x8000  $BUILD/arduinocore.ino.partitions.bin \
+  0xe000  $BUILD/boot_app0.bin \
+  0x10000 $BUILD/arduinocore.ino.bin
+```
+
+### Serial Monitor (Python — arduino-cli monitor fails on ESP32-C6)
+
+```bash
+PYTHONUNBUFFERED=1 .venv/bin/python3 -u -c "
+import serial, time
+s = serial.Serial('/dev/tty.usbmodem101', 115200, timeout=3)
+start = time.time()
+while time.time() - start < 60:
+    line = s.readline()
+    if line:
+        print(line.decode(errors='replace').rstrip(), flush=True)
+s.close()
+"
+```
+
+---
+
+## Software Architecture
+
+### Call Chain (`arduinocore.ino`)
+
+```
+setup() / loop()
+    └── readAll()
+            ├── read_float_block(reg, num_regs)
+            │       └── read_regs(slave, FC03, start_reg, num_regs)
+            │               ├── build Modbus FC03 request frame
+            │               ├── DE pin HIGH → transmit frame via RS485
+            │               ├── DE pin LOW  → wait for response
+            │               └── validate CRC → return raw bytes
+            └── regs_to_float(hi, lo)  — IEEE 754 register pair → float
+```
+
+### Key Functions
+
+| Function | Role |
+|----------|------|
+| `read_regs()` | Builds FC03 frame, drives DE pin, reads and CRC-validates response |
+| `read_float_block()` | Calls `read_regs()`, converts each register pair to IEEE 754 float |
+| `readAll()` | Reads all measurement groups; prints OK/FAIL per group |
+| `calc_modbus_crc()` | CRC-16/Modbus (poly `0xA001`, init `0xFFFF`) |
+| `printReadings()` | Formats and prints all values over USB CDC Serial |
+| `probe()` | Runs once at startup; tests FC03 on reg 2999 to verify meter is responding |
+
+---
+
+## PM2200 Register Map
+
+> All wire addresses = datasheet address − 1 (Modbus is 0-based on the wire)
+
+| Parameter | Datasheet | Wire (use this) | Size | Unit |
+|-----------|-----------|-----------------|------|------|
+| Active Energy Delivered | 2700 | **2699** | FLOAT32 | kWh |
+| Current Ia | 3000 | **2999** | FLOAT32 | A |
+| Current Ib | 3002 | **3001** | FLOAT32 | A |
+| Current Ic | 3004 | **3003** | FLOAT32 | A |
+| Voltage Van | 3028 | **3027** | FLOAT32 | V |
+| Voltage Vbn | 3030 | **3029** | FLOAT32 | V |
+| Voltage Vcn | 3032 | **3031** | FLOAT32 | V |
+| Active Power Pa | 3054 | **3053** | FLOAT32 | kW |
+| Active Power Pb | 3056 | **3055** | FLOAT32 | kW |
+| Active Power Pc | 3058 | **3057** | FLOAT32 | kW |
+| Active Power Total | 3060 | **3059** | FLOAT32 | kW |
+| Reactive Power Qa | 3062 | **3061** | FLOAT32 | kVAR |
+| Reactive Power Qb | 3064 | **3063** | FLOAT32 | kVAR |
+| Reactive Power Qc | 3066 | **3065** | FLOAT32 | kVAR |
+| Reactive Power Total | 3068 | **3067** | FLOAT32 | kVAR |
+| Apparent Power Sa | 3070 | **3069** | FLOAT32 | kVA |
+| Apparent Power Sb | 3072 | **3071** | FLOAT32 | kVA |
+| Apparent Power Sc | 3074 | **3073** | FLOAT32 | kVA |
+| Apparent Power Total | 3076 | **3075** | FLOAT32 | kVA |
+
+---
+
+## ⚠️ Important Warnings (Confirmed by Live Testing)
+
+### 1. FC04 is NOT supported — use FC03 only
+
+```
+02 84 01  →  Exception: Illegal Function
+```
+
+### 2. Register addresses are 0-based on the wire (datasheet − 1)
+
+Using the datasheet address directly returns:
+```
+02 83 03  →  Exception: Illegal Data Value
+```
+
+### 3. Parity must be None (8N1), not Even (8E1)
+
+Schneider docs say 8E1 but this unit only responds to 8N1.
+
+---
+
+## Modbus RTU Protocol Reference
+
+### Frame Structure (FC03 — Read Holding Registers)
+
+**Request (8 bytes):**
 ```
 ┌──────────┬──────────┬───────────────┬──────────────┬───────────┐
 │ Slave ID │ Function │ Start Register│   Quantity   │    CRC    │
-│  1 byte  │  1 byte  │   2 bytes     │   2 bytes    │  2 bytes  │
-│          │  (0x03)  │  (Hi, Lo)     │  (Hi, Lo)    │ (Lo, Hi)  │
+│  1 byte  │   0x03   │   2 bytes     │   2 bytes    │  2 bytes  │
 └──────────┴──────────┴───────────────┴──────────────┴───────────┘
-     8 bytes total
 ```
 
-**Example: Read Voltage A-N (register 3028, quantity 2)**
-
-| Byte | Value | Meaning |
-|------|-------|---------|
-| 0 | `0x01` | Slave address 1 |
-| 1 | `0x03` | Function code: Read Holding Registers |
-| 2 | `0x0B` | Start register high byte (3028 = 0x0BD4) |
-| 3 | `0xD4` | Start register low byte |
-| 4 | `0x00` | Quantity high byte |
-| 5 | `0x02` | Quantity low byte (2 registers = 1 FLOAT32) |
-| 6 | `0xXX` | CRC low byte |
-| 7 | `0xXX` | CRC high byte |
-
-#### Response Frame (Slave → Master)
-
+**Response:**
 ```
 ┌──────────┬──────────┬────────────┬─────────────────────────┬───────────┐
 │ Slave ID │ Function │ Byte Count │     Register Data       │    CRC    │
-│  1 byte  │  1 byte  │   1 byte   │  N × 2 bytes            │  2 bytes  │
-│          │  (0x03)  │  (N×2)     │  (Hi, Lo per register)  │ (Lo, Hi)  │
+│  1 byte  │   0x03   │  N×2 bytes │  N × 2 bytes (Hi, Lo)   │  2 bytes  │
 └──────────┴──────────┴────────────┴─────────────────────────┴───────────┘
 ```
 
-**Example: Response for Voltage A-N = 230.5 V**
-
-| Byte | Value | Meaning |
-|------|-------|---------|
-| 0 | `0x01` | Slave address |
-| 1 | `0x03` | Function code echo |
-| 2 | `0x04` | Byte count (2 regs × 2 bytes = 4) |
-| 3 | `0x43` | Register 3028 high byte |
-| 4 | `0x66` | Register 3028 low byte |
-| 5 | `0x80` | Register 3029 high byte |
-| 6 | `0x00` | Register 3029 low byte |
-| 7 | `0xXX` | CRC low byte |
-| 8 | `0xXX` | CRC high byte |
-
-### CRC-16 Calculation
-
-Every Modbus RTU frame ends with a 16-bit CRC (Cyclic Redundancy Check) for error detection.
-
-**Algorithm (CRC-16/Modbus):**
-1. Initialize CRC = `0xFFFF`
-2. For each byte in the message:
-   - XOR the byte into the low byte of CRC
-   - Repeat 8 times:
-     - If the LSB of CRC is 1: shift right by 1, XOR with `0xA001`
-     - If the LSB is 0: shift right by 1
-3. The result is the 16-bit CRC (transmitted **low byte first**, then high byte)
+### CRC-16/Modbus
 
 ```
 CRC = 0xFFFF
 for each byte:
     CRC = CRC XOR byte
     repeat 8 times:
-        if (CRC & 1):
-            CRC = (CRC >> 1) XOR 0xA001
-        else:
-            CRC = CRC >> 1
+        if (CRC & 1):  CRC = (CRC >> 1) XOR 0xA001
+        else:          CRC = CRC >> 1
 ```
+Transmitted **low byte first**, then high byte.
 
-### Inter-frame Timing
+### IEEE 754 FLOAT32 — Register Pair to Float
 
-Modbus RTU uses **silence** (no data) to delimit frames:
-- **3.5 character times** of silence = frame boundary
-- At 9600 baud: 1 character = 11 bits → 3.5 chars ≈ **4.01 ms**
-- At ≥19200 baud: fixed at **1.75 ms** (per Modbus specification)
-
----
-
-## IEEE 754 FLOAT32 Conversion
-
-### Why is this needed?
-
-The PM2230 stores measurement values as **IEEE 754 single-precision floating point** numbers. Each value occupies **2 consecutive Modbus registers** (2 × 16 bits = 32 bits).
-
-### IEEE 754 Single-Precision Format
-
-```
- 31  30       23  22                    0
-┌───┬──────────┬──────────────────────────┐
-│ S │ Exponent │       Mantissa           │
-│1b │  8 bits  │       23 bits            │
-└───┴──────────┴──────────────────────────┘
-```
-
-| Field | Bits | Description |
-|-------|------|-------------|
-| **S** (Sign) | Bit 31 | `0` = positive, `1` = negative |
-| **Exponent** | Bits 30–23 | Biased exponent (bias = 127) |
-| **Mantissa** | Bits 22–0 | Fractional part (implicit leading 1) |
-
-**Formula:**
-
-$$value = (-1)^S \times 2^{(Exponent - 127)} \times (1 + Mantissa)$$
-
-### Worked Example: 230.5 V
-
-**Step 1: Convert 230.5 to binary**
-- 230 = `11100110`
-- 0.5 = `.1`
-- 230.5 = `11100110.1`
-
-**Step 2: Normalize**
-- `1.11001101 × 2^7`
-- Exponent = 7 + 127 (bias) = **134** = `10000110`
-- Mantissa = `11001101 00000000 0000000` (23 bits, drop the leading 1)
-
-**Step 3: Assemble 32 bits**
-
-```
-S  Exponent   Mantissa
-0  10000110   11001101 00000000 0000000
-
-Hex: 0x43668000
-```
-
-**Step 4: Split into two 16-bit Modbus registers**
-
-```
-Register Hi (first) : 0x4366
-Register Lo (second): 0x8000
-```
-
-### Code Conversion (Register Pair → Float)
-
-The meter transmits registers in **big-endian word order** (high register first):
+Each value = 2 consecutive registers (32 bits total, big-endian word order):
 
 ```cpp
-float _toFloat(uint16_t regHi, uint16_t regLo) {
+float regs_to_float(uint16_t regHi, uint16_t regLo) {
     uint32_t raw = ((uint32_t)regHi << 16) | regLo;
     float value;
     memcpy(&value, &raw, sizeof(float));
@@ -202,56 +219,19 @@ float _toFloat(uint16_t regHi, uint16_t regLo) {
 }
 ```
 
-1. `regHi` is shifted left 16 bits and combined with `regLo` to form a 32-bit integer
-2. `memcpy` reinterprets those 32 bits as an IEEE 754 float (no undefined behavior, unlike pointer casts)
-
 ---
 
-## PM2200 Register Map (used in this code)
+## Utility Scripts
 
-| Parameter | Register | Size | Unit |
-|-----------|----------|------|------|
-| Current A | 3000 | FLOAT32 (2 regs) | A |
-| Current B | 3002 | FLOAT32 | A |
-| Current C | 3004 | FLOAT32 | A |
-| Voltage A-B | 3020 | FLOAT32 | V |
-| Voltage B-C | 3022 | FLOAT32 | V |
-| Voltage C-A | 3024 | FLOAT32 | V |
-| Voltage A-N | 3028 | FLOAT32 | V |
-| Voltage B-N | 3030 | FLOAT32 | V |
-| Voltage C-N | 3032 | FLOAT32 | V |
-| Active Power A | 3054 | FLOAT32 | kW |
-| Active Power B | 3056 | FLOAT32 | kW |
-| Active Power C | 3058 | FLOAT32 | kW |
-| Active Power Total | 3060 | FLOAT32 | kW |
-| Reactive Power A | 3062 | FLOAT32 | kVAR |
-| Reactive Power B | 3064 | FLOAT32 | kVAR |
-| Reactive Power C | 3066 | FLOAT32 | kVAR |
-| Reactive Power Total | 3068 | FLOAT32 | kVAR |
-| Apparent Power A | 3070 | FLOAT32 | kVA |
-| Apparent Power B | 3072 | FLOAT32 | kVA |
-| Apparent Power C | 3074 | FLOAT32 | kVA |
-| Apparent Power Total | 3076 | FLOAT32 | kVA |
-| Power Factor A | 3078 | FLOAT32 | — |
-| Power Factor B | 3080 | FLOAT32 | — |
-| Power Factor C | 3082 | FLOAT32 | — |
-| Power Factor Total | 3084 | FLOAT32 | — |
-| Frequency | 3110 | FLOAT32 | Hz |
+| Script | Purpose |
+|--------|---------|
+| `test_pm2200.py` | Test meter directly via USB-RS485 adapter (no ESP32 needed). Probes then polls Van/Vbn/Vcn every 2s. |
+| `sniff_rs485.py` | Passively sniffs all Modbus traffic on the bus; decodes FC03 requests/responses and exception frames. |
 
-> Register addresses are sourced from: `Public_PM2xxx_PMC Register List_v1001.xls`
+### Setup
 
----
+```bash
+python3 -m venv .venv
+.venv/bin/pip install pyserial
+```
 
-## Wiring Summary
-
-| ESP32-C6 Pin | RS485 Module | Description |
-|-------------|-------------|-------------|
-| GPIO 14 | RO (Receiver Out) | UART RX |
-| GPIO 15 | DI (Driver In) | UART TX |
-| GPIO 18 | DE + RE (tied) | Direction control |
-| 3.3V | VCC | Power |
-| GND | GND | Ground |
-
-Serial config: **9600 baud, 8E1** (8 data bits, Even parity, 1 stop bit — Schneider default)
-
-RS485 module A/B lines connect to the PM2230 meter's Modbus RS485 terminal.
